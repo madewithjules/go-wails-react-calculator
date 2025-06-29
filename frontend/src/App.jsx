@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import {useState} from 'react';
 import './App.css';
-import { Calculate } from '../wailsjs/go/main/App'; // Ensure this path is correct
+import {Calculate} from '../wailsjs/go/main/App'; // Ensure this path is correct
 
 // Standalone utility function
 const findLastIndexOfAny = (str, chars) => {
@@ -24,17 +24,17 @@ function App() {
     ['4', '5', '6', '-'],
     ['1', '2', '3', '+'],
     ['0', '.', '%', '='],
-    ['x²', '√', 'π']
+    ['x²', '√', 'π'],
   ];
 
-  const getButtonClass = (btn) => {
+  const getButtonClass = btn => {
     if (['/', '*', '-', '+', '=', '%', '√', 'x²'].includes(btn)) return 'button-operator';
     if (['C'].includes(btn)) return 'button-control';
     if (['(', ')', '.', 'π'].includes(btn)) return 'button-symbol';
     return 'button-number';
   };
 
-  const handleButtonClick = async (value) => {
+  const handleButtonClick = async value => {
     switch (value) {
       case 'C':
         setExpression('0');
@@ -50,28 +50,28 @@ function App() {
         }
         break;
       case 'x²':
-        setExpression(prev => prev === '0' ? value : prev + '^2');
-        setDisplayValue(prev => prev === '0' ? value : prev + '^2');
+        setExpression(prev => (prev === '0' ? value : prev + '^2'));
+        setDisplayValue(prev => (prev === '0' ? value : prev + '^2'));
         break;
       case '√':
-        setExpression(prev => prev === '0' ? 'sqrt(' : prev + 'sqrt(');
-        setDisplayValue(prev => prev === '0' ? 'sqrt(' : prev + 'sqrt(');
+        setExpression(prev => (prev === '0' ? 'sqrt(' : prev + 'sqrt('));
+        setDisplayValue(prev => (prev === '0' ? 'sqrt(' : prev + 'sqrt('));
         break;
       case 'π':
-        setExpression(prev => prev === '0' ? 'π' : prev + 'π');
-        setDisplayValue(prev => prev === '0' ? 'π' : prev + 'π');
+        setExpression(prev => (prev === '0' ? 'π' : prev + 'π'));
+        setDisplayValue(prev => (prev === '0' ? 'π' : prev + 'π'));
         break;
       case '.':
-        const operatorChars = ['+','-','*','/','(',')','^','%','sqrt('];
+        const operatorChars = ['+', '-', '*', '/', '(', ')', '^', '%', 'sqrt('];
         const lastOpIndex = findLastIndexOfAny(expression, operatorChars);
         const currentSegment = lastOpIndex === -1 ? expression : expression.slice(lastOpIndex + 1);
 
         if (expression === '0' || displayValue === '0') {
-            setExpression('0.');
-            setDisplayValue('0.');
+          setExpression('0.');
+          setDisplayValue('0.');
         } else if (!currentSegment.includes('.')) {
-            setExpression(prev => prev + '.');
-            setDisplayValue(prev => prev + '.');
+          setExpression(prev => prev + '.');
+          setDisplayValue(prev => prev + '.');
         }
         break;
       case '+':
@@ -81,8 +81,8 @@ function App() {
       case '%':
       case '(':
       case ')':
-        setExpression(prev => (prev === '0' && value !== '(' && value !== ')') ? value : prev + value);
-        setDisplayValue(prev => (prev === '0' && value !== '(' && value !== ')') ? value : prev + value);
+        setExpression(prev => (prev === '0' && value !== '(' && value !== ')' ? value : prev + value));
+        setDisplayValue(prev => (prev === '0' && value !== '(' && value !== ')' ? value : prev + value));
         break;
       default: // Numbers
         if (expression === '0') {
@@ -102,11 +102,7 @@ function App() {
         <div className="display">{displayValue}</div>
         <div className="buttons">
           {buttonLayout.flat().map((btn, i) => (
-            <button
-              key={i}
-              className={`button ${getButtonClass(btn)}`}
-              onClick={() => handleButtonClick(btn)}
-            >
+            <button key={i} className={`button ${getButtonClass(btn)}`} onClick={() => handleButtonClick(btn)}>
               {btn}
             </button>
           ))}

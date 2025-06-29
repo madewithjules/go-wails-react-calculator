@@ -70,8 +70,8 @@ func (a *App) Calculate(expression string) string {
 				return nil, fmt.Errorf("mod: arguments must be numbers")
 			}
 			if arg2 == 0 {
-                return nil, fmt.Errorf("mod: division by zero")
-            }
+				return nil, fmt.Errorf("mod: division by zero")
+			}
 			return math.Mod(arg1, arg2), nil
 		},
 	}
@@ -85,10 +85,9 @@ func (a *App) Calculate(expression string) string {
 	// The user is currently inputting "expression²" from frontend.
 	// So we should replace "²" with "^2".
 	processedExpression = strings.ReplaceAll(processedExpression, "²", "^2")
-    // Frontend sends "%" for modulo, govaluate supports it directly.
-    // If "mod(a,b)" was sent from frontend, it would work with the custom "mod" func.
-    // Since frontend sends "a%b", no specific replacement for mod is needed here for govaluate.
-
+	// Frontend sends "%" for modulo, govaluate supports it directly.
+	// If "mod(a,b)" was sent from frontend, it would work with the custom "mod" func.
+	// Since frontend sends "a%b", no specific replacement for mod is needed here for govaluate.
 
 	evaluableExpression, err := govaluate.NewEvaluableExpressionWithFunctions(processedExpression, functions)
 	if err != nil {

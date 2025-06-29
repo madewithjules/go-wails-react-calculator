@@ -25,7 +25,6 @@ func TestCalculate(t *testing.T) {
 		{"Order of Operations", "(1+2)*3", "9", false},
 		{"Complex Order of Operations", "10-(2+3*2)/2", "6", false},
 
-
 		// Decimal Numbers
 		{"Decimal Addition", "1.5+2.5", "4", false},
 		{"Decimal Multiplication", "1.5*2", "3", false},
@@ -35,25 +34,23 @@ func TestCalculate(t *testing.T) {
 		{"PI Calculation", "π*2", "6.283185307179586", false},
 
 		// Square Root
-		{"Square Root Valid", "√9", "3", false},       // sqrt(9)
+		{"Square Root Valid", "√9", "3", false},        // sqrt(9)
 		{"Square Root Decimal", "√6.25", "2.5", false}, // sqrt(6.25)
 		{"Square Root of Negative", "√(-1)", "Error: sqrt: cannot take square root of negative number", true},
 
 		// Power of Two
-		{"Power of Two Simple", "3²", "9", false},        // 3^2
-		{"Power of Two Expression", "(1+2)²", "9", false}, // (1+2)^2
+		{"Power of Two Simple", "3²", "9", false},           // 3^2
+		{"Power of Two Expression", "(1+2)²", "9", false},   // (1+2)^2
 		{"Power of Two Negative Base", "(-2)²", "4", false}, // (-2)^2
-
 
 		// Modulo Operation
 		{"Modulo Valid", "5%2", "1", false},
 		{"Modulo Zero Result", "6%3", "0", false},
 		{"Modulo by Zero Custom Func", "mod(5,0)", "Error: mod: division by zero", true}, // Using custom func directly
-		{"Modulo by Zero Native", "5%0", "Error: Division by zero", true}, // govaluate handles this for '%' operator
-
+		{"Modulo by Zero Native", "5%0", "Error: Division by zero", true},                // govaluate handles this for '%' operator
 
 		// Valid Mixed Operations
-		{"Mixed Simple", "1+2*3-4/2", "5", false}, // 1+6-2 = 5
+		{"Mixed Simple", "1+2*3-4/2", "5", false},                                 // 1+6-2 = 5
 		{"Mixed Complex", "(√16 + (1+1)²) / (π - 1)", "3.731938615061078", false}, // (4 + 4) / (3.14159... - 1) = 8 / 2.14159...
 
 		// Invalid Expressions & Edge Cases
@@ -66,7 +63,7 @@ func TestCalculate(t *testing.T) {
 		{"Sqrt Invalid Arg Type", "sqrt(\"abc\")", "Error: sqrt: argument must be a number", true}, // String literal in expression
 		{"PI Invalid Arg Count", "PI(1)", "Error: PI: expected 0 arguments, got 1", true},
 		{"Expression leading to NaN or Inf (e.g. sqrt(-1) without custom error)", "1/0", "Error: Division by zero", true}, // Already covered, but good to be mindful
-		{"Very Large Number", "999999999999999999*999999999999999999", "9.999999999999999e+35", false}, // govaluate handles large numbers
+		{"Very Large Number", "999999999999999999*999999999999999999", "9.999999999999999e+35", false},                    // govaluate handles large numbers
 	}
 
 	for _, tc := range testCases {
