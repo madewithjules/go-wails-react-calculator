@@ -1,0 +1,133 @@
+name: Build Application
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+    branches:
+      - main
+  release:
+    types:
+      - created
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - name: Run go mod tidy and check for changes
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        go mod tidy
+        if [[ -n $(git status --porcelain go.mod go.sum) ]]; then
+          echo "go.mod or go.sum differs after go mod tidy. Please run 'go mod tidy' and commit the changes."
+          git diff
+          exit 1
+        fi
+
+    - name: Check gofmt formatting
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        test -z $(gofmt -l .) || (echo "Go code is not formatted. Run gofmt -w ." && exit 1)
+
+    - name: Check goimports formatting
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        test -z $(goimports -l .) || (echo "Go code is not formatted with goimports. Run goimports -w ." && exit 1)
+
+    - name: Run go vet
+      if: matrix.os == 'ubuntu-latest'
+      run: go vet ./...
+
+    - name: Run govulncheck
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        # Ensure govulncheck is installed
+        go install golang.org/x/vuln/cmd/govulncheck@latest
+        govulncheck ./...
+
+    - name: Run staticcheck
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        # Ensure staticcheck is installed
+        go install honnef.co/go/tools/cmd/staticcheck@latest
+        staticcheck ./...
+
+    - name: Install Wails CLI
+      run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+    - name: Upload build artifacts - Linux
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+
+    - name: Check Wails version and prerequisites (optional but good for debug)
+      run: wails doctor
+
+    - name: Run Go tests
+      run: go test ./...
+
+    - name: Install npm dependencies
+      working-directory: ./frontend/
+      run: |
+        npm ci
+
+    - name: Run npm tests
+      working-directory: ./frontend/
+      run: |
+        npm run test
+
+    - name: Build Wails application (ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: wails build -tags webkit2_41
+
+    - name: Build Wails application (other)
+      if: matrix.os != 'ubuntu-latest'
+      run: wails build
+
+    - name: Upload build artifacts - Linux
+      if: matrix.os == 'ubuntu-latest'
+      uses: actions/upload-artifact@v4
+      with:
+        name: go-wails-rect-linux
+        path: build/bin/go-wails-react
+
+    - name: Upload build artifacts - Windows
+      if: matrix.os == 'windows-latest'
+      uses: actions/upload-artifact@v4
+      with:
+        name: go-wails-rect-windows
+        path: build/bin/go-wails-react.exe
+
+    - name: Upload build artifacts - macOS
+      if: matrix.os == 'macos-latest'
+      uses: actions/upload-artifact@v4
+      with:
+        name: go-wails-rect-macos
+        path: build/bin/go-wails-react.app
