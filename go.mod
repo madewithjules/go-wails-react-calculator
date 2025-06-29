@@ -2,7 +2,10 @@ module go-wails-react
 
 go 1.24
 
-require github.com/wailsapp/wails/v2 v2.10.1
+require (
+	github.com/Knetic/govaluate v3.0.0+incompatible
+	github.com/wailsapp/wails/v2 v2.10.1
+)
 
 require (
 	github.com/bep/debounce v1.2.1 // indirect
