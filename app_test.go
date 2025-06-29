@@ -51,7 +51,7 @@ func TestCalculate(t *testing.T) {
 
 		// Valid Mixed Operations
 		{"Mixed Simple", "1+2*3-4/2", "5", false},                                 // 1+6-2 = 5
-		{"Mixed Complex", "(√16 + (1+1)²) / (π - 1)", "3.731938615061078", false}, // (4 + 4) / (3.14159... - 1) = 8 / 2.14159...
+		{"Mixed Complex", "(√16 + (1+1)²) / (π - 1)", "3.735537655394079", false}, // (4 + 4) / (3.14159... - 1) = 8 / 2.14159...
 
 		// Invalid Expressions & Edge Cases
 		{"Empty Expression", "", "Error: Expression is empty", true}, // govaluate specific error
@@ -63,7 +63,7 @@ func TestCalculate(t *testing.T) {
 		{"Sqrt Invalid Arg Type", "sqrt(\"abc\")", "Error: sqrt: argument must be a number", true}, // String literal in expression
 		{"PI Invalid Arg Count", "PI(1)", "Error: PI: expected 0 arguments, got 1", true},
 		{"Expression leading to NaN or Inf (e.g. sqrt(-1) without custom error)", "1/0", "Error: Division by zero", true}, // Already covered, but good to be mindful
-		{"Very Large Number", "999999999999999999*999999999999999999", "9.999999999999999e+35", false},                    // govaluate handles large numbers
+		{"Very Large Number", "999999999999999999*999999999999999999", "1e+36", false},                                    // govaluate handles large numbers
 	}
 
 	for _, tc := range testCases {
