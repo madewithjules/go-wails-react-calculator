@@ -5,6 +5,7 @@ go 1.24
 require github.com/wailsapp/wails/v2 v2.10.1
 
 require (
+	github.com/Knetic/govaluate v3.0.0+incompatible // indirect
 	github.com/bep/debounce v1.2.1 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
