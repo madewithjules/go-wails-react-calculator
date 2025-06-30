@@ -1,4 +1,4 @@
-import {useState} from 'react';
+import {useState, useEffect} from 'react';
 import './App.css';
 import {Calculate} from '../wailsjs/go/main/App'; // Ensure this path is correct
 
@@ -95,6 +95,68 @@ function App() {
         break;
     }
   };
+
+  useEffect(() => {
+    const handleKeyPress = (event) => {
+      const {key} = event;
+      let buttonValue = null;
+
+      // Map keyboard keys to button values
+      if (key >= '0' && key <= '9') {
+        buttonValue = key;
+      } else {
+        switch (key) {
+          case '+':
+          case '-':
+          case '*':
+          case '/':
+          case '%':
+          case '(':
+          case ')':
+          case '.':
+            buttonValue = key;
+            break;
+          case 'Enter':
+          case '=':
+            buttonValue = '=';
+            break;
+          case 'Backspace':
+          case 'Delete':
+            buttonValue = 'C';
+            break;
+          case 'Escape':
+            buttonValue = 'C';
+            break;
+          // Add more mappings if necessary, e.g., for 'x²', '√', 'π'
+          // These might require Shift or Alt modifiers, or different key choices
+          // For simplicity, direct key mappings are shown here.
+          // Example for 'x^2' (assuming 's' for square):
+          // case 's':
+          //   buttonValue = 'x²';
+          //   break;
+          // Example for 'sqrt' (assuming 'r' for root):
+          // case 'r':
+          //   buttonValue = '√';
+          //   break;
+          // Example for 'pi' (assuming 'p' for pi):
+          // case 'p':
+          //   buttonValue = 'π';
+          //   break;
+        }
+      }
+
+      if (buttonValue) {
+        handleButtonClick(buttonValue);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+
+    // Cleanup event listener on component unmount
+    return () => {
+      window.removeEventListener('keydown', handleKeyPress);
+    };
+  }, [handleButtonClick]); // Add handleButtonClick to dependency array if it's stable
 
   return (
     <div id="App">
