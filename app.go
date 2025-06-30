@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"regexp"
+	"strconv"
 	"strings"
-
-	"github.com/Knetic/govaluate"
 )
 
 // App struct
@@ -25,226 +25,335 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 }
 
-// Calculate returns the result of a mathematical expression
-func (a *App) Calculate(expression string) string {
-	// Define custom functions
-	functions := map[string]govaluate.ExpressionFunction{
-		"sqrt": func(args ...interface{}) (interface{}, error) {
-			if len(args) != 1 {
-				return nil, fmt.Errorf("sqrt: expected 1 argument, got %d", len(args))
-			}
-			val, ok := args[0].(float64)
-			if !ok {
-				return nil, fmt.Errorf("sqrt: argument must be a number")
-			}
-			if val < 0 {
-				return nil, fmt.Errorf("sqrt: cannot take square root of negative number")
-			}
-			return math.Sqrt(val), nil
-		},
-		"PI": func(args ...interface{}) (interface{}, error) {
-			if len(args) != 0 {
-				return nil, fmt.Errorf("PI: expected 0 arguments, got %d", len(args))
-			}
-			return math.Pi, nil
-		},
-		// govaluate supports ^ for power and % for modulo, so custom pow2 and mod might be redundant
-		// but implementing as requested.
-		"pow2": func(args ...interface{}) (interface{}, error) {
-			if len(args) != 1 {
-				return nil, fmt.Errorf("pow2: expected 1 argument, got %d", len(args))
-			}
-			val, ok := args[0].(float64)
-			if !ok {
-				return nil, fmt.Errorf("pow2: argument must be a number")
-			}
-			return math.Pow(val, 2), nil
-		},
-		"mod": func(args ...interface{}) (interface{}, error) {
-			if len(args) != 2 {
-				return nil, fmt.Errorf("mod: expected 2 arguments, got %d", len(args))
-			}
-			arg1, ok1 := args[0].(float64)
-			arg2, ok2 := args[1].(float64)
-			if !ok1 || !ok2 {
-				return nil, fmt.Errorf("mod: arguments must be numbers")
-			}
-			if arg2 == 0 {
-				return nil, fmt.Errorf("mod: division by zero")
-			}
-			return math.Mod(arg1, arg2), nil
-		},
+// TokenType defines the type of a token
+type TokenType int
+
+const (
+	TokenNumber TokenType = iota
+	TokenOperator
+	TokenLeftParen
+	TokenRightParen
+	TokenFunction
+	TokenComma
+	TokenIdentifier // For function names before they are confirmed
+)
+
+// Token represents a token in the expression
+type Token struct {
+	Type  TokenType
+	Value string
+	Prec  int // Precedence for operators
+	Arity int // Arity for functions
+}
+
+var knownFunctions = map[string]int{
+	"sqrt": 1,
+	"PI":   0,
+	"pow2": 1,
+	"mod":  2,
+}
+
+// preprocess handles textual replacements for special characters
+func preprocess(expression string) string {
+	s := expression
+	s = strings.ReplaceAll(s, "π", "PI()")
+	// Handle '√' followed by a number or parenthesized expression
+	// Example: √9 -> sqrt(9), √(1+2) -> sqrt(1+2)
+	// This regex looks for '√' followed by a number or a parenthesized expression
+	reSqrt := regexp.MustCompile(`√\s*(\d+(\.\d+)?|\([^)]+\))`)
+	s = reSqrt.ReplaceAllStringFunc(s, func(match string) string {
+		arg := strings.TrimSpace(strings.TrimPrefix(match, "√"))
+		return fmt.Sprintf("sqrt(%s)", arg)
+	})
+	// Fallback for simple sqrt if regex doesn't match (e.g. √ followed by variable name, not handled yet)
+	// For now, this simpler replacement ensures "√" becomes "sqrt" if the regex didn't catch it.
+	// The tokenizer will then expect "sqrt" followed by "(".
+	if !strings.Contains(s,"sqrt("){
+		s = strings.ReplaceAll(s, "√", "sqrt")
 	}
 
-	// Pre-process the expression string
-	processedExpression := strings.ReplaceAll(expression, "π", "PI()")
-	// Replace √<number> with sqrt(<number>)
-	// This is a simplified approach. A more robust solution would use regex
-	// to handle expressions like √(1+2) or √some_variable.
-	// For now, assuming simple √<number> patterns from frontend.
-	if strings.Contains(processedExpression, "√") {
-		parts := strings.SplitN(processedExpression, "√", 2)
-		if len(parts) == 2 && len(parts[1]) > 0 {
-			// Attempt to isolate the number/expression immediately following √
-			// This is still naive. e.g., "√9+1" becomes "sqrt(9+1)" which might be ok.
-			// "1+√9" becomes "1+sqrt(9)"
-			// "√9*√4" would require more careful parsing.
-			// For now, let's assume the frontend sends expressions where √ is followed by a number
-			// or a simple expression that govaluate can parse inside sqrt().
 
-			// A quick fix for simple cases like "√9" or "√6.25"
-			// More complex expressions like "√(9+7)" are not handled by this simple replacement.
-			// and would require a more sophisticated parser or for the user to input sqrt(9+7).
-			// The test cases are "√9" and "√6.25", so this should work for them.
-			// Also handle cases like "√(-1)"
+	// Handle '²' (squared) applied to a number or parenthesized expression
+	// Example: 3² -> pow2(3), (1+2)² -> pow2((1+2))
+	// This regex looks for a number or parenthesized expression followed by '²'
+	reSq := regexp.MustCompile(`(\d+(\.\d+)?|\([^)]+\))\s*²`)
+	s = reSq.ReplaceAllStringFunc(s, func(match string) string {
+		base := strings.TrimSpace(strings.TrimSuffix(match, "²"))
+		return fmt.Sprintf("pow2(%s)", base)
+	})
 
-			// Rebuild expression to correctly wrap sqrt arguments
-			var sb strings.Builder
-			for i, char := range expression {
-				if char == '√' {
-					sb.WriteString("sqrt(")
-					// Look ahead to find the argument for sqrt
-					// This is still a simplified parser. It assumes numbers or simple parenthesized expressions.
-					// It doesn't handle nested functions well without more state.
-					argStart := i + 1
-					argEnd := argStart
-					tempOpenParens := 0
-					for j := argStart; j < len(expression); j++ {
-						ch := expression[j]
-						if (ch >= '0' && ch <= '9') || ch == '.' {
-							argEnd = j + 1
-						} else if ch == '(' {
-							tempOpenParens++
-							argEnd = j + 1
-						} else if ch == ')' {
-							tempOpenParens--
-							argEnd = j + 1
-							if tempOpenParens < 0 { // Should not happen in valid expressions
-								break
-							}
-						} else if tempOpenParens > 0 { // if inside parens, continue consuming
-							argEnd = j + 1
-						} else { // char is an operator or space, end of simple numeric arg
-							break
-						}
+	return s
+}
+
+// Tokenizer converts an infix expression string into a list of tokens
+func Tokenizer(expression string) ([]Token, error) {
+	var tokens []Token
+	var buffer strings.Builder // Used for numbers or identifiers (function names)
+
+	for i := 0; i < len(expression); i++ {
+		char := rune(expression[i])
+		sChar := string(char)
+
+		if (char >= '0' && char <= '9') || char == '.' {
+			buffer.WriteString(sChar)
+		} else if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') {
+			buffer.WriteString(sChar) // Start of an identifier
+		} else {
+			// End of number or identifier
+			if buffer.Len() > 0 {
+				val := buffer.String()
+				buffer.Reset()
+				if arity, isFunc := knownFunctions[val]; isFunc {
+					tokens = append(tokens, Token{Type: TokenFunction, Value: val, Arity: arity})
+				} else if _, err := strconv.ParseFloat(val, 64); err == nil {
+					if strings.Count(val, ".") > 1 {
+						return nil, fmt.Errorf("invalid number: %s", val)
 					}
-					sb.WriteString(expression[argStart:argEnd])
-					sb.WriteString(")")
-					// Skip original characters that were processed
-					// This is tricky; the outer loop will advance i.
-					// This whole block needs a more robust parsing strategy.
-					// For now, let's stick to the simpler ReplaceAll and fix later if it's still an issue.
+					tokens = append(tokens, Token{Type: TokenNumber, Value: val})
 				} else {
-					// sb.WriteRune(char) // This logic is getting too complex for a quick fix.
+					// Was not a known function and not a number. Could be an unknown identifier.
+					// For this calculator, unknown identifiers are errors.
+					return nil, fmt.Errorf("unknown identifier or function: %s", val)
 				}
 			}
-			// Reverting to a simpler strategy for now due to complexity of robust parsing here.
-			// The original ReplaceAll("√", "sqrt") was problematic for "√9" -> "sqrt9".
-			// Let's try to make sure sqrt is followed by parenthesis for the tests.
-			// The tests have "√9", "√6.25", "√(-1)".
-			// Replacing "√" with "sqrt" and then trying to wrap the immediate next number.
-		}
-	}
-	// Simpler sqrt replacement strategy:
-	// Replace "√" with "sqrt(" and then find where to put the closing parenthesis.
-	// This is still error prone. For example "√9+1" -> "sqrt(9)+1" is desired.
-	// "10-√9" -> "10-sqrt(9)"
-	// "√9*2" -> "sqrt(9)*2"
-	// This requires identifying the argument to sqrt.
-	// The test cases are simple: "√9", "√6.25", "√(-1)"
-	// For these, we can replace "√" with "sqrt" and rely on govaluate's parsing for function calls if written like "sqrt(9)".
-	// The issue is that "√9" becomes "sqrt9".
-	// Let's refine the replacement to add parentheses for standalone sqrt cases.
-	// This will not correctly handle √ followed by a parenthesized expression like √(1+2)
-	// without more complex regex or parsing.
 
-	processedExpression = expression // Start fresh with processing logic
-	processedExpression = strings.ReplaceAll(processedExpression, "π", "PI()")
-	// Try using ** for power, as ^ seems to be XOR
-	processedExpression = strings.ReplaceAll(processedExpression, "²", "**2")
-
-	// Handle sqrt: "√<number>" -> "sqrt(<number>)"
-	// This is a common pattern. For more complex cases like "√(expr)", user should use "sqrt(expr)".
-	// Using a loop to handle multiple occurrences, e.g. "√9 + √16"
-	var tempBuilder strings.Builder
-	inSqrt := false
-	sqrtArg := ""
-	// Iterate over runes, not bytes, to correctly handle multi-byte characters like '√'
-	for _, char := range processedExpression {
-		// char is already a rune
-		if char == '√' {
-			if inSqrt { // Should not happen if expressions are well-formed
-				tempBuilder.WriteString(sqrtArg) // write whatever was collected
-				sqrtArg = ""
-			}
-			inSqrt = true
-			tempBuilder.WriteString("sqrt(")
-		} else if inSqrt {
-			// Collect characters for sqrt argument.
-			// Argument ends if we hit an operator, space, or end of string,
-			// unless we are inside parentheses for the sqrt argument itself.
-			// This simple logic assumes numbers or simple identifiers as arguments.
-			if (char >= '0' && char <= '9') || char == '.' || (char == '-' && len(sqrtArg) == 0) { // allow negative sign at start
-				sqrtArg += string(char)
+			// Handle current character
+			if strings.ContainsRune("+-*/", char) {
+				prec := 1 // Default for +,-
+				if char == '*' || char == '/' {
+					prec = 2
+				}
+				if char == '-' {
+					isUnary := (len(tokens) == 0) || (tokens[len(tokens)-1].Type == TokenOperator || tokens[len(tokens)-1].Type == TokenLeftParen || tokens[len(tokens)-1].Type == TokenComma)
+					if isUnary {
+						tokens = append(tokens, Token{Type: TokenNumber, Value: "0"})
+					}
+				}
+				tokens = append(tokens, Token{Type: TokenOperator, Value: sChar, Prec: prec})
+			} else if char == '(' {
+				tokens = append(tokens, Token{Type: TokenLeftParen, Value: sChar})
+			} else if char == ')' {
+				tokens = append(tokens, Token{Type: TokenRightParen, Value: sChar})
+			} else if char == ',' {
+				tokens = append(tokens, Token{Type: TokenComma, Value: sChar})
+			} else if char == ' ' {
+				// Ignore whitespace
 			} else {
-				// Argument for sqrt ends here
-				tempBuilder.WriteString(sqrtArg)
-				tempBuilder.WriteString(")")
-				sqrtArg = ""
-				inSqrt = false
-				tempBuilder.WriteRune(char) // write current char that ended sqrt arg
+				return nil, fmt.Errorf("invalid character: %s", sChar)
 			}
+		}
+	}
+
+	// After loop, check if buffer has anything left (number or identifier)
+	if buffer.Len() > 0 {
+		val := buffer.String()
+		if arity, isFunc := knownFunctions[val]; isFunc {
+			tokens = append(tokens, Token{Type: TokenFunction, Value: val, Arity: arity})
+		} else if _, err := strconv.ParseFloat(val, 64); err == nil {
+			if strings.Count(val, ".") > 1 {
+				return nil, fmt.Errorf("invalid number: %s", val)
+			}
+			tokens = append(tokens, Token{Type: TokenNumber, Value: val})
 		} else {
-			tempBuilder.WriteRune(char)
+			return nil, fmt.Errorf("unknown identifier or function at end of expression: %s", val)
 		}
 	}
-	if inSqrt { // If expression ends with sqrt argument
-		tempBuilder.WriteString(sqrtArg)
-		tempBuilder.WriteString(")")
-	}
-	processedExpression = tempBuilder.String()
 
-	evaluableExpression, err := govaluate.NewEvaluableExpressionWithFunctions(processedExpression, functions)
-	if err != nil {
-		// Check for specific parsing errors that might indicate our preprocessing was insufficient
-		if strings.Contains(err.Error(), "could not parse expression") && strings.Contains(processedExpression, "sqrt") {
-			// This might indicate a failure in how "√" was converted
-			// For example, if "√" was not followed by a number we could parse.
-			return fmt.Sprintf("Error: Invalid use of square root or syntax error near √. Ensure it's like √9 or sqrt(expression). Original: %s, Processed: %s", expression, processedExpression)
+	return tokens, nil
+}
+
+// ShuntingYard converts infix tokens to RPN (postfix)
+func ShuntingYard(tokens []Token) ([]Token, error) {
+	var outputQueue []Token
+	var operatorStack []Token
+
+	for _, token := range tokens {
+		switch token.Type {
+		case TokenNumber:
+			outputQueue = append(outputQueue, token)
+		case TokenFunction:
+			operatorStack = append(operatorStack, token)
+		case TokenOperator:
+			for len(operatorStack) > 0 {
+				topOp := operatorStack[len(operatorStack)-1]
+				if topOp.Type == TokenLeftParen || topOp.Type == TokenComma { // Comma check might be redundant here based on overall logic
+					break
+				}
+				if topOp.Type == TokenFunction || (topOp.Type == TokenOperator && topOp.Prec >= token.Prec) {
+					outputQueue = append(outputQueue, topOp)
+					operatorStack = operatorStack[:len(operatorStack)-1]
+				} else {
+					break
+				}
+			}
+			operatorStack = append(operatorStack, token)
+		case TokenComma:
+			foundLeftParenOrFunc := false
+			for len(operatorStack) > 0 {
+				topOp := operatorStack[len(operatorStack)-1]
+				if topOp.Type == TokenLeftParen {
+					foundLeftParenOrFunc = true
+					break
+				}
+				outputQueue = append(outputQueue, topOp)
+				operatorStack = operatorStack[:len(operatorStack)-1]
+			}
+			if !foundLeftParenOrFunc {
+				return nil, fmt.Errorf("misplaced comma or mismatched parentheses for function arguments")
+			}
+		case TokenLeftParen:
+			operatorStack = append(operatorStack, token)
+		case TokenRightParen:
+			foundLeftParen := false
+			for len(operatorStack) > 0 {
+				topOp := operatorStack[len(operatorStack)-1]
+				operatorStack = operatorStack[:len(operatorStack)-1]
+				if topOp.Type == TokenLeftParen {
+					foundLeftParen = true
+					// If the token before the left parenthesis is a function, pop it to output.
+					if len(operatorStack) > 0 && operatorStack[len(operatorStack)-1].Type == TokenFunction {
+						outputQueue = append(outputQueue, operatorStack[len(operatorStack)-1])
+						operatorStack = operatorStack[:len(operatorStack)-1]
+					}
+					break
+				}
+				outputQueue = append(outputQueue, topOp)
+			}
+			if !foundLeftParen {
+				return nil, fmt.Errorf("mismatched parentheses")
+			}
 		}
+	}
+
+	for len(operatorStack) > 0 {
+		topOp := operatorStack[len(operatorStack)-1]
+		if topOp.Type == TokenLeftParen || topOp.Type == TokenComma { // Comma should not be on stack here
+			return nil, fmt.Errorf("mismatched parentheses or comma issue")
+		}
+		outputQueue = append(outputQueue, topOp)
+		operatorStack = operatorStack[:len(operatorStack)-1]
+	}
+
+	return outputQueue, nil
+}
+
+// EvaluateRPN evaluates an RPN token queue
+func EvaluateRPN(rpnTokens []Token) (float64, error) {
+	var operandStack []float64
+
+	for _, token := range rpnTokens {
+		switch token.Type {
+		case TokenNumber:
+			num, err := strconv.ParseFloat(token.Value, 64)
+			if err != nil {
+				return 0, fmt.Errorf("invalid number in RPN: %s", token.Value)
+			}
+			operandStack = append(operandStack, num)
+		case TokenOperator:
+			if len(operandStack) < 2 {
+				return 0, fmt.Errorf("syntax error (not enough operands for %s)", token.Value)
+			}
+			op2 := operandStack[len(operandStack)-1]
+			op1 := operandStack[len(operandStack)-2]
+			operandStack = operandStack[:len(operandStack)-2]
+			var result float64
+			switch token.Value {
+			case "+": result = op1 + op2
+			case "-": result = op1 - op2
+			case "*": result = op1 * op2
+			case "/":
+				if op2 == 0 { return 0, fmt.Errorf("division by zero") }
+				result = op1 / op2
+			default: return 0, fmt.Errorf("unknown operator %s", token.Value)
+			}
+			operandStack = append(operandStack, result)
+		case TokenFunction:
+			if len(operandStack) < token.Arity {
+				return 0, fmt.Errorf("not enough arguments for function %s (expected %d, got %d)", token.Value, token.Arity, len(operandStack))
+			}
+			args := make([]float64, token.Arity)
+			for i := token.Arity - 1; i >= 0; i-- {
+				args[i] = operandStack[len(operandStack)-1]
+				operandStack = operandStack[:len(operandStack)-1]
+			}
+			var result float64
+			var err error
+			switch token.Value {
+			case "sqrt":
+				if args[0] < 0 { err = fmt.Errorf("sqrt: cannot take square root of negative number (%v)", args[0]) } else { result = math.Sqrt(args[0]) }
+			case "PI":
+				result = math.Pi
+			case "pow2":
+				result = math.Pow(args[0], 2)
+			case "mod":
+				if args[1] == 0 { err = fmt.Errorf("mod: division by zero (%v %% %v)", args[0], args[1]) } else { result = math.Mod(args[0], args[1]) }
+			default:
+				err = fmt.Errorf("unknown function %s", token.Value)
+			}
+			if err != nil { return 0, err }
+			operandStack = append(operandStack, result)
+		}
+	}
+
+	if len(operandStack) != 1 {
+		// This could be due to mismatched parens not caught, or functions not eating args correctly, or just a number.
+		// If input is just "5", RPN is ["5"], stack has [5]. This is valid.
+		// If input is "5 5", RPN is ["5", "5"], stack has [5,5]. Invalid.
+		// If input is "sin" (unknown func), tokenizer errors.
+		// If input is "1 +", tokenizer is fine, SY might be fine, RPN eval fails on operator.
+		// If input is "(1+2" (mismatched paren), SY should error.
+		// If input is "1 2 3", tokenizer gives three numbers. SY gives [1,2,3]. Eval RPN leads to stack [1,2,3] -> error.
+		if len(rpnTokens) > 1 && (len(rpnTokens) != 2*len(operandStack) -1 && tokenIsOperatorOrFunction(rpnTokens[len(rpnTokens)-1])) {
+			// A more specific check or rely on the generic one.
+		}
+		return 0, fmt.Errorf("invalid expression (final stack size %d, expected 1)", len(operandStack))
+	}
+	return operandStack[0], nil
+}
+func tokenIsOperatorOrFunction(token Token) bool {
+    return token.Type == TokenOperator || token.Type == TokenFunction
+}
+
+// Calculate returns the result of a mathematical expression
+func (a *App) Calculate(expression string) string {
+	if strings.TrimSpace(expression) == "" {
+		return ""
+	}
+
+	preprocessedExpression := preprocess(expression)
+
+	tokens, err := Tokenizer(preprocessedExpression)
+	if err != nil {
 		return fmt.Sprintf("Error: %s", err.Error())
 	}
 
-	result, err := evaluableExpression.Evaluate(nil)
-	if err != nil {
-		// Check if the error is from our custom functions (e.g. sqrt of negative)
-		// These errors are already prefixed with "sqrt: ", "PI: ", etc.
-		// So we can wrap them further or return as is.
-		// The test suite expects "Error: <message from custom function>"
-		// So, fmt.Sprintf("Error: %s", err.Error()) is correct for those.
+	// Handle case like "PI" which becomes "PI()" -> tokens: PI, (, )
+	// If only a number is entered, e.g. "5", tokens: 5. RPN: 5. Result: 5. This is fine.
+	// If "PI()" is input, RPN: PI. Result: 3.14...
+	if len(tokens) == 0 && strings.TrimSpace(preprocessedExpression) != "" {
+		return "Error: Invalid expression (empty token list after preprocessing)"
+	}
+     if len(tokens) == 0 && strings.TrimSpace(preprocessedExpression) == ""{
+		return ""
+	}
 
-		// For division by zero from govaluate itself (not our custom 'mod' function)
-		// govaluate might return an error for "1/0" if it's not configured to return Infinity.
-		// However, the problem description indicates it returns +Inf.
-		// Let's assume govaluate itself returns an error for division by zero if it's not returning Inf.
-		// If err.Error() is "division by zero", we should format it.
-		if strings.Contains(strings.ToLower(err.Error()), "division by zero") {
-			return "Error: Division by zero"
-		}
+
+	rpnTokens, err := ShuntingYard(tokens)
+	if err != nil {
+		return fmt.Sprintf("Error: %s (during shunting yard)", err.Error())
+	}
+
+    if len(rpnTokens) == 0 && strings.TrimSpace(preprocessedExpression) != "" {
+		// This can happen for input "()" -> preprocessed "()" -> tokens LPAREN, RPAREN -> shunting yard empty.
+		// EvaluateRPN will then correctly error "invalid RPN expression (stack not empty at end)" or similar.
+		// Or if input is just "PI", preprocess makes "PI()", Shunting yard: PI, LPAR, RPAR -> RPN: PI. EvalRPN: PI -> result.
+    }
+
+
+	result, err := EvaluateRPN(rpnTokens)
+	if err != nil {
 		return fmt.Sprintf("Error: %s", err.Error())
 	}
 
-	// Check for Infinity results from division, as govaluate might return these instead of errors
-	if fResult, ok := result.(float64); ok {
-		if math.IsInf(fResult, 1) || math.IsInf(fResult, -1) {
-			// This case handles "1/0" if govaluate returns math.Inf
-			return "Error: Division by zero"
-		}
-		// Handle NaN results as errors too
-		if math.IsNaN(fResult) {
-			return "Error: Result is not a number (NaN)"
-		}
-	}
-
-	return fmt.Sprintf("%v", result)
+	return strconv.FormatFloat(result, 'f', -1, 64)
 }
